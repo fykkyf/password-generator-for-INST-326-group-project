@@ -1,6 +1,6 @@
 from datetime import datetime
 import pandas as pd
-#from Password_Generator import Password_Generator
+#from Password_dictionary import Password_dictionary
 
 class PasswordManager:
     """
