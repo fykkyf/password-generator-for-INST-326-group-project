@@ -7,11 +7,10 @@ class PasswordStrengthChecker:
         self.min_length = min_length
         self.common_patterns = ["1234", "password", "abcd", "qwerty"]
         self.score_map = {
-            0: "Very Weak",
+            0: "You serious?",
             1: "Weak",
             2: "Medium",
-            3: "Strong",
-            4: "Very Strong"
+            3: "Strong"
         }
 
     "(2) method to check the length"
