@@ -1,70 +1,210 @@
 from datetime import datetime
+import sqlite3
+import random
 import pandas as pd
-#from Password_dictionary import Password_dictionary
+
+from PasswordStrengthChecker import PasswordStrengthChecker
+from password_dictionary import ALL_CHARS
+
 
 class PasswordManager:
     """
-    Manages password entries using a pandas.
-
-    Each password entry includes:
-    - site
-    - username
-    - password
-    - notes
-    - created_at
+    Manages password entries using SQLite for storage
+    Uses pandas for viewing, importing, and exporting password data
     """
 
-    def __init__(self, storage_file="passwords.csv"):
+    def __init__(self, db_name="passwords.db"):
         """
-        Initialize the PasswordManager.
+        Initialize the PasswordManager
+        Store the database file name
+        Create the passwords table
+        Load existing data into a pandas dataframe
+        """
+        self.db_name = db_name
+        self._create_table()
+        self.df = self._load_from_db()
 
-        Attempts to load existing passwords from the storage file.
-        If the file does not exist, starts with an empty set of entries.
+    def _connect(self):
         """
-        self.storage_file = storage_file
-        try:
-            self.df = pd.read_csv(self.storage_file)
-        except FileNotFoundError:
-            self.df = pd.DataFrame(
-                columns=["site", "username", "password", "notes", "created_at"]
+        Create and return a connection to the sqlite database.
+        """
+        return sqlite3.connect(self.db_name)
+
+    def _create_table(self):
+        """
+        Create the passwords table
+        """
+        with self._connect() as conn:
+            cur = conn.cursor()
+
+            # defines the structure of the passwords table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS passwords (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    site TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    password TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+
+            #saves the changes
+            conn.commit()
+
+    def _load_from_db(self):
+        """
+        Load all password records from sqlite into a pandas DataFrame
+        """
+        with self._connect() as conn:
+            # executes the sql and returns a dataframe
+            return pd.read_sql_query(
+                "SELECT id, site, username, password, created_at FROM passwords ORDER BY id ASC",
+                conn
             )
-    
-    def add_password(self, site, username, password, notes=""):
-        """
-        Add a new password entry.
-        """
-        new_entry = {
-            "site": site,
-            "username": username,
-            "password": password,
-            "notes": notes,
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-        }
-        self.df = pd.concat(
-            [self.df, pd.DataFrame([new_entry])],
-            ignore_index=True
-        )
 
-    def list_passwords(self):
+    def _refresh_df(self):
         """
-        Return all password entries as a list of dictionaries.
+        Refresh the DataFrame
         """
+        self.df = self._load_from_db()
+
+    def generate_password(self, length=12):
+        """
+        Generate a random password using ALL_CHARS.
+        """
+        if length < 4:
+            # Prevents weak passwords
+            raise ValueError("Password length must be at least 4")
+
+
+        # picks a random char and combines all characters into a single string
+        return "".join(random.choice(ALL_CHARS) for _ in range(length))
+
+    def add_password(self, site, username, password):
+        """
+        Add a new password entry to the database
+        and returns the password strength label
+        """
+        # Use passwordstrengthchecker
+        checker = PasswordStrengthChecker()
+        strength_label = checker.get_strength_label(password)
+
+        # Store the current timestamp
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with self._connect() as conn:
+            cur = conn.cursor()
+
+            # Use ? placeholders to insert values
+            cur.execute("""
+                INSERT INTO passwords (site, username, password, created_at)
+                VALUES (?, ?, ?, ?)
+            """, (site, username, password, created_at))
+
+            conn.commit()
+
+        # Reload dataframe
+        self._refresh_df()
+        return strength_label
+
+    def get_all_passwords(self):
+        """
+        Return all password entries as a list of dictionaries
+        """
+        self._refresh_df()
         return self.df.to_dict(orient="records")
 
-    def find_by_site(self, site):
+    def get_passwords_for_site(self, site):
         """
-        Return all password entries for a given site name.
-        Matching is case-insensitive.
+        Return all password entries that match a given site name
         """
-        if "site" not in self.df.columns:
+        self._refresh_df()
+
+        # If the database is empty it returns an empty list
+        if self.df.empty:
             return []
+
+        # Convert both values to lowercase to avoid it being case sensitive
         mask = self.df["site"].astype(str).str.lower() == site.lower()
+
+        # Convert rows back into a list of dictionaries
         return self.df[mask].to_dict(orient="records")
 
-    def remove_password(self, site, username):
+    def update_password(self, entry_id, new_password):
         """
-        Remove password entries that match the given site and username.
-        Matching is case-insensitive.
+        Update the password for a specific entry ID
+        Returns the new password strength label
         """
-        pass
-    
+        checker = PasswordStrengthChecker()
+        strength_label = checker.get_strength_label(new_password)
+
+        with self._connect() as conn:
+            cur = conn.cursor()
+
+            #update only the row that matches the given id
+            cur.execute("""
+                UPDATE passwords
+                SET password = ?
+                WHERE id = ?
+            """, (new_password, entry_id))
+
+            conn.commit()
+
+        # Refresh dataframe so changes appear immediately
+        self._refresh_df()
+        return strength_label
+
+    def remove_password(self, entry_id):
+        """
+        Remove a password entry by its database ID
+        """
+        with self._connect() as conn:
+            cur = conn.cursor()
+
+            # Delete the row with the matching id
+            cur.execute("DELETE FROM passwords WHERE id = ?", (entry_id,))
+            conn.commit()
+
+        self._refresh_df()
+
+    def export_csv(self, csv_path):
+        """
+        Export all password entries to a csv file using pandas
+        """
+        self._refresh_df()
+
+        # donesnt let pandas from adding an extra index column
+        self.df.to_csv(csv_path, index=False)
+
+    def import_csv(self, csv_path):
+        """
+        Import password entries from a csv file into the database
+        The csv must contain site, username, password coloms
+        """
+        # Load CSV into a DataFrame
+        df_in = pd.read_csv(csv_path)
+
+        # required columns exist
+        required = {"site", "username", "password"}
+        if not required.issubset(df_in.columns):
+            raise ValueError("CSV must contain columns: site, username, password")
+
+        #keep only required columns and drop rows with missing values
+        df_in = df_in[["site", "username", "password"]].dropna()
+
+        with self._connect() as conn:
+            cur = conn.cursor()
+
+            #insert each row from the csv into the database
+            for _, row in df_in.iterrows():
+                created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                cur.execute("""
+                    INSERT INTO passwords (site, username, password, created_at)
+                    VALUES (?, ?, ?, ?)
+                """, (row["site"], row["username"], row["password"], created_at))
+
+            conn.commit()
+
+        # Refresh DataFrame after importing
+        self._refresh_df()
