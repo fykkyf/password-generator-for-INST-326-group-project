@@ -3,7 +3,7 @@ import secrets
 import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional
-from password_dictionary import PASSWORD_CHARS
+from PasswordDictionary import PASSWORD_CHARS
 
 
 @dataclass

@@ -4,7 +4,7 @@ import random
 import pandas as pd
 
 from PasswordStrengthChecker import PasswordStrengthChecker
-from password_dictionary import ALL_CHARS
+from PasswordDictionary import ALL_CHARS
 from PasswordGenerator import PasswordGenerator, GeneratorPolicy
 
 class PasswordManager:
