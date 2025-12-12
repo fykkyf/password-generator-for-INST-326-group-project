@@ -5,7 +5,7 @@ import pandas as pd
 
 from PasswordStrengthChecker import PasswordStrengthChecker
 from password_dictionary import ALL_CHARS
-
+from PasswordGenerator import PasswordGenerator, GeneratorPolicy
 
 class PasswordManager:
     """
@@ -13,7 +13,7 @@ class PasswordManager:
     Uses pandas for viewing, importing, and exporting password data
     """
 
-    def __init__(self, db_name="passwords.db"):
+    def __init__(self, db_name="passwords.db", min_strength="Medium"):
         """
         Initialize the PasswordManager
         Store the database file name
@@ -21,6 +21,9 @@ class PasswordManager:
         Load existing data into a pandas dataframe
         """
         self.db_name = db_name
+        self.min_strength = min_strength
+        self.checker = PasswordStrengthChecker()
+        self.generator = PasswordGenerator(GeneratorPolicy(min_length=15, max_length=32))
         self._create_table()
         self.df = self._load_from_db()
 
@@ -68,17 +71,18 @@ class PasswordManager:
         """
         self.df = self._load_from_db()
 
-    def generate_password(self, length=12):
-        """
-        Generate a random password using ALL_CHARS.
-        """
-        if length < 4:
-            # Prevents weak passwords
-            raise ValueError("Password length must be at least 4")
+    def _enforce_strength(self, password: str) -> str:
+        label = self.checker.get_strength_label(password)
+        if not self.checker.meets_min_strength(password, self.min_strength):
+            raise ValueError(f"Password too weak ({label}). Minimum required: {self.min_strength}")
+        return label
 
-
-        # picks a random char and combines all characters into a single string
-        return "".join(random.choice(ALL_CHARS) for _ in range(length))
+    def generate_strong_password(self, length: int):
+        while True:
+            pwd = self.generator.generate(length)
+            label = self.checker.get_strength_label(pwd)
+            if self.checker.meets_min_strength(pwd, self.min_strength):
+                return pwd, label
 
     def add_password(self, site, username, password):
         """
@@ -86,21 +90,15 @@ class PasswordManager:
         and returns the password strength label
         """
         # Use passwordstrengthchecker
-        checker = PasswordStrengthChecker()
-        strength_label = checker.get_strength_label(password)
+        strength_label = self._enforce_strength(password)
 
-        # Store the current timestamp
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
         with self._connect() as conn:
             cur = conn.cursor()
-
-            # Use ? placeholders to insert values
             cur.execute("""
-                INSERT INTO passwords (site, username, password, created_at)
-                VALUES (?, ?, ?, ?)
-            """, (site, username, password, created_at))
-
+                        INSERT INTO passwords (site, username, password, created_at)
+                        VALUES (?, ?, ?, ?)
+                        """, (site, username, password, created_at))
             conn.commit()
 
         # Reload dataframe
@@ -135,22 +133,13 @@ class PasswordManager:
         Update the password for a specific entry ID
         Returns the new password strength label
         """
-        checker = PasswordStrengthChecker()
-        strength_label = checker.get_strength_label(new_password)
+        strength_label = self._enforce_strength(new_password)
 
         with self._connect() as conn:
             cur = conn.cursor()
-
-            #update only the row that matches the given id
-            cur.execute("""
-                UPDATE passwords
-                SET password = ?
-                WHERE id = ?
-            """, (new_password, entry_id))
-
+            cur.execute("UPDATE passwords SET password = ? WHERE id = ?", (new_password, entry_id))
             conn.commit()
 
-        # Refresh dataframe so changes appear immediately
         self._refresh_df()
         return strength_label
 
@@ -177,34 +166,31 @@ class PasswordManager:
         self.df.to_csv(csv_path, index=False)
 
     def import_csv(self, csv_path):
-        """
-        Import password entries from a csv file into the database
-        The csv must contain site, username, password coloms
-        """
-        # Load CSV into a DataFrame
         df_in = pd.read_csv(csv_path)
-
-        # required columns exist
         required = {"site", "username", "password"}
         if not required.issubset(df_in.columns):
-            raise ValueError("CSV must contain columns: site, username, password")
+            raise ValueError("CSV must include: site, username, password")
 
-        #keep only required columns and drop rows with missing values
-        df_in = df_in[["site", "username", "password"]].dropna()
+        imported = 0
+        skipped = 0
 
         with self._connect() as conn:
             cur = conn.cursor()
-
-            #insert each row from the csv into the database
             for _, row in df_in.iterrows():
-                created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                pwd = str(row["password"])
+                try:
+                    self._enforce_strength(pwd)
+                except ValueError:
+                    skipped += 1
+                    continue
 
+                created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 cur.execute("""
                     INSERT INTO passwords (site, username, password, created_at)
                     VALUES (?, ?, ?, ?)
-                """, (row["site"], row["username"], row["password"], created_at))
-
+                """, (row["site"], row["username"], pwd, created_at))
+                imported += 1
             conn.commit()
 
-        # Refresh DataFrame after importing
         self._refresh_df()
+        return imported, skipped

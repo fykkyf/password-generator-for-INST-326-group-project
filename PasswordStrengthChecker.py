@@ -71,3 +71,11 @@ class PasswordStrengthChecker:
             "strength": self.get_strength_label(password),
             "details": self.get_detailed_report(password)
         }
+
+    def strength_rank(self, label: str) -> int:
+        order = {"Weak": 0, "Medium": 1, "Strong": 2}
+        return order.get(label, -1)
+
+    def meets_min_strength(self, password: str, min_label: str = "Medium") -> bool:
+        label = self.get_strength_label(password)
+        return self.strength_rank(label) >= self.strength_rank(min_label)
