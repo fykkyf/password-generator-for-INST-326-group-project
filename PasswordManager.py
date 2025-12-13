@@ -27,14 +27,6 @@ class PasswordManager:
         self._create_table()
         self.df = self._load_from_db()
         
-    def generate_password(self, length=15):
-        """Generate a password with a required length of 15-32 characters."""
-        # Enforce your project requirement
-        if length < 15 or length > 32:
-            raise ValueError("Password length must be between 15 and 32.")
-
-        # Use PasswordGenerator class
-        return self.generator.generate(length)
 
     def _connect(self):
         """
@@ -86,16 +78,16 @@ class PasswordManager:
             raise ValueError(f"Password too weak ({label}). Minimum required: {self.min_strength}")
         return label
 
-def generate_password(self, length=15):
-    """
-    Generate a random password using ALL_CHARS
-    Password length must be between 15 and 32 characters
-    """
-    if length < 15 or length > 32:
-        raise ValueError("Password length must be between 15 and 32 characters.")
+    def generate_password(self, length=15):
+        """
+        Generate a random password using ALL_CHARS
+        Password length must be between 15 and 32 characters
+        """
+        if length < 15 or length > 32:
+            raise ValueError("Password length must be between 15 and 32 characters.")
 
-    # Randomly select characters and join them into one string
-    return "".join(random.choice(ALL_CHARS) for _ in range(length))
+        # Randomly select characters and join them into one string
+        return "".join(random.choice(ALL_CHARS) for _ in range(length))
 
     def add_password(self, site, username, password):
         """
